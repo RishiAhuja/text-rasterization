@@ -1,0 +1,48 @@
+# Compiled binaries
+text_raster
+*.exe
+*.out
+*.app
+
+# Object files
+*.o
+*.obj
+
+# Libraries
+*.lib
+*.a
+*.so
+*.dylib
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# IDE files
+.vscode/
+.vs/
+*.vcxproj*
+*.sln
+
+# Font files (often large)
+*.ttf
+*.otf
+*.woff
+*.woff2
+
+# Output files
+output/
+renders/
+*.bmp
+*.png
+*.jpg
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Build directories
+build/
+cmake-build-*/
