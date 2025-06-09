@@ -146,3 +146,126 @@ void TTFReader::printHexDump(const std::vector<uint8_t>& data, size_t offset) {
     }
     std::cout << std::dec; // Reset to decimal
 }
+
+
+
+
+bool TTFReader::readGlyphHeader(GlyphHeader& header) {
+    if (!file.good()) return false;
+    
+    file.read(reinterpret_cast<char*>(&header.numberOfContours), 2);
+    file.read(reinterpret_cast<char*>(&header.xMin), 2);
+    file.read(reinterpret_cast<char*>(&header.yMin), 2);
+    file.read(reinterpret_cast<char*>(&header.xMax), 2);
+    file.read(reinterpret_cast<char*>(&header.yMax), 2);
+    
+    if (littleEndian) {
+        header.numberOfContours = static_cast<int16_t>(swapUint16(header.numberOfContours));
+        header.xMin = static_cast<int16_t>(swapUint16(header.xMin));
+        header.yMin = static_cast<int16_t>(swapUint16(header.yMin));
+        header.xMax = static_cast<int16_t>(swapUint16(header.xMax));
+        header.yMax = static_cast<int16_t>(swapUint16(header.yMax));
+    }
+    return file.good();
+}
+
+bool TTFReader::readSimpleGlyph(SimpleGlyph& glyph) {
+    if(!readGlyphHeader(glyph.header)) return false;
+
+    if (glyph.header.numberOfContours < 0) {
+        std::cout << "Composite glyph - not implemented yet" << std::endl;
+        return false;
+    }
+
+    glyph.endPtsOfContours.resize(glyph.header.numberOfContours);
+    for (int i = 0; i < glyph.header.numberOfContours; i++) {
+        uint16_t endPt;
+        file.read(reinterpret_cast<char*>(&endPt), 2);
+        if (littleEndian) endPt = swapUint16(endPt);
+        glyph.endPtsOfContours[i] = endPt;
+    }
+
+    uint16_t numPoints = glyph.endPtsOfContours.back() + 1;
+
+    uint16_t instructionLength;
+    file.read(reinterpret_cast<char*>(&instructionLength), 2);
+    if (littleEndian) instructionLength = swapUint16(instructionLength);
+    file.seekg(instructionLength, std::ios::cur); // Skip instructions
+    
+    std::vector<uint8_t> flags;
+    flags.reserve(numPoints);
+
+    for (uint16_t i = 0; i < numPoints; ) {
+        uint8_t flag;
+        file.read(reinterpret_cast<char*>(&flag), 1);
+        flags.push_back(flag);
+        i++;
+        
+        // Handle repeat flag
+        if (flag & 0x08) { // REPEAT_FLAG
+            uint8_t repeatCount;
+            file.read(reinterpret_cast<char*>(&repeatCount), 1);
+            for (int j = 0; j < repeatCount && i < numPoints; j++, i++) {
+                flags.push_back(flag);
+            }
+        }
+    }
+
+    glyph.points.resize(numPoints);
+    int16_t currentX = 0, currentY = 0;
+
+    for (uint16_t i = 0; i < numPoints; i++) {
+        uint8_t flag = flags[i];
+        glyph.points[i].onCurve = (flag & 0x01) != 0;  
+
+        if (flag & 0x02) { // X_SHORT_VECTOR
+            uint8_t deltaX;
+            file.read(reinterpret_cast<char*>(&deltaX), 1);
+            currentX += (flag & 0x10) ? deltaX : -deltaX;
+        } else if (!(flag & 0x10)) { // X coordinate changed
+            int16_t deltaX;
+            file.read(reinterpret_cast<char*>(&deltaX), 2);
+            if (littleEndian) deltaX = static_cast<int16_t>(swapUint16(deltaX));
+            currentX += deltaX;
+        }
+
+        glyph.points[i].x = currentX;
+    }
+
+     for (uint16_t i = 0; i < numPoints; i++) {
+        uint8_t flag = flags[i];
+        
+        if (flag & 0x04) { // Y_SHORT_VECTOR
+            uint8_t deltaY;
+            file.read(reinterpret_cast<char*>(&deltaY), 1);
+            currentY += (flag & 0x20) ? deltaY : -deltaY;
+        } else if (!(flag & 0x20)) { // Y coordinate changed
+            int16_t deltaY;
+            file.read(reinterpret_cast<char*>(&deltaY), 2);
+            if (littleEndian) deltaY = static_cast<int16_t>(swapUint16(deltaY));
+            currentY += deltaY;
+        }
+        glyph.points[i].y = currentY;
+    }
+    return true;
+}
+
+
+void TTFReader::printGlyph(const SimpleGlyph& glyph) {
+    std::cout << "Glyph Info:" << std::endl;
+    std::cout << "  Contours: " << glyph.header.numberOfContours << std::endl;
+    std::cout << "  Bounding box: (" << glyph.header.xMin << ", " << glyph.header.yMin 
+              << ") to (" << glyph.header.xMax << ", " << glyph.header.yMax << ")" << std::endl;
+    
+    std::cout << "  End points: ";
+    for (auto endPt : glyph.endPtsOfContours) {
+        std::cout << endPt << " ";
+    }
+    std::cout << std::endl;
+    
+    std::cout << "  Points:" << std::endl;
+    for (size_t i = 0; i < glyph.points.size(); i++) {
+        std::cout << "    " << i << ": (" << glyph.points[i].x << ", " << glyph.points[i].y 
+                  << ") " << (glyph.points[i].onCurve ? "ON" : "OFF") << std::endl;
+    }
+}

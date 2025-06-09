@@ -15,9 +15,25 @@ struct TTFHeader {
     uint16_t rangeShift;
 };
 
+struct GlyphHeader {
+    int16_t numberOfContours;
+    int16_t xMin, yMin, xMax, yMax;
+};
+
+struct Point {
+    int16_t x, y;
+    bool onCurve;
+};
+
+struct SimpleGlyph {
+    GlyphHeader header;
+    std::vector<uint16_t> endPtsOfContours;
+    std::vector<Point> points;
+};
+
 // Table Directory Entry
 struct TableEntry {
-    char tag[5];        // 4 chars + null terminator
+    char tag[5];       
     uint32_t checksum;
     uint32_t offset;
     uint32_t length;
@@ -49,6 +65,11 @@ public:
     bool seekToTable(const std::string& tableName);
     std::vector<uint8_t> readBytes(size_t count);
     void printHexDump(const std::vector<uint8_t>& data, size_t offset = 0);
+
+    // glphy reading functions
+    bool readGlyphHeader(GlyphHeader& header);
+    bool readSimpleGlyph(SimpleGlyph& glyph);
+    void printGlyph(const SimpleGlyph& glyph);
 };
 
 #endif

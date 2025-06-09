@@ -24,11 +24,17 @@ int main() {
     TableEntry glyfEntry;
     if (reader.findTable("glyf", glyfEntry)) {
         std::cout << "Found 'glyf' table at offset: " << glyfEntry.offset 
-                    << ", length: " << glyfEntry.length << std::endl;
+                  << ", length: " << glyfEntry.length << std::endl;
         
         if (reader.seekToTable("glyf")) {
-            auto glyfData = reader.readBytes(200);  // Read first 200 bytes
-            reader.printHexDump(glyfData, glyfEntry.offset);
+            // Instead of hex dump, let's parse the first glyph
+            std::cout << "\n--- Parsing first glyph ---" << std::endl;
+            SimpleGlyph glyph;
+            if (reader.readSimpleGlyph(glyph)) {
+                reader.printGlyph(glyph);
+            } else {
+                std::cout << "Failed to parse glyph" << std::endl;
+            }
         }
     } else {
         std::cout << "'glyf' table not found!" << std::endl;
