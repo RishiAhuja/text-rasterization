@@ -39,6 +39,11 @@ struct TableEntry {
     uint32_t length;
 };
 
+struct BezierPoint {
+    float x, y;
+    BezierPoint(float x = 0, float y = 0) : x(x), y(y) {}
+};
+
 class TTFReader {
 private:
     std::ifstream file;
@@ -80,6 +85,13 @@ public:
     bool readGlyphByIndex(int glyphIndex, SimpleGlyph& glyph);
     void readMultipleGlyphsByIndex(int startIndex, int count);
 
+    // Bezier curve functions
+    BezierPoint lerp(const BezierPoint& p1, const BezierPoint& p2, float t);
+    BezierPoint quadraticBezier(const BezierPoint& start, const BezierPoint& control, const BezierPoint& end, float t);
+    std::vector<BezierPoint> generateBezierCurve(const BezierPoint& start, const BezierPoint& control, const BezierPoint& end, int resolution = 20);
+    std::vector<BezierPoint> generateGlyphOutline(const SimpleGlyph& glyph, int resolution = 20);
+    std::vector<BezierPoint> generateContourOutline(const SimpleGlyph& glyph, size_t startPt, size_t endPt, int resolution = 20);
+    void exportGlyphWithCurves(const SimpleGlyph& glyph, const std::string& filename);
 };
 
 #endif

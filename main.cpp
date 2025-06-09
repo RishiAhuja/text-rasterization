@@ -29,7 +29,8 @@ int main() {
         if (reader.seekToTable("glyf")) {
             // Instead of hex dump, let's parse the first glyph
             std::cout << "\n--- Parsing first glyph ---" << std::endl;
-            // SimpleGlyph glyph;
+            SimpleGlyph glyph;
+            int glyphIndex = 3;
             // SimpleGlyph glyph2;
             // SimpleGlyph glyph3;
             // if (reader.readSimpleGlyph(glyph)) {
@@ -55,7 +56,18 @@ int main() {
             // }
             //  reader.readMultipleGlyphs(5);
             std::cout << "\n=== Reading Glyphs by Index ===" << std::endl;
-            reader.readMultipleGlyphsByIndex(1, 26);  // Read glyphs 1-10
+            // reader.readMultipleGlyphsByIndex(1, 26);  // Read glyphs 1-10
+            if (reader.readGlyphByIndex(glyphIndex, glyph)) {
+                reader.printGlyph(glyph);
+                reader.plotGlyph(glyph);
+
+                // Export both versions
+                std::string basicFilename = "glyph_" + std::to_string(glyphIndex) + "_basic.svg";
+                std::string curveFilename = "glyph_" + std::to_string(glyphIndex) + "_curves.svg";
+
+                reader.exportGlyphSVG(glyph, basicFilename);           // Original (straight lines)
+                reader.exportGlyphWithCurves(glyph, curveFilename);    // With Bézier curves
+            }
         }
     } else {
         std::cout << "'glyf' table not found!" << std::endl;

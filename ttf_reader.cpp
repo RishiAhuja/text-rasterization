@@ -332,7 +332,7 @@ void TTFReader::exportGlyphSVG(const SimpleGlyph& glyph, const std::string& file
         size_t startPt = pointIndex;
         size_t endPt = glyph.endPtsOfContours[contour];
         
-        svg << "<polyline points=\"";
+        svg << "<polygon points=\"";
         while (pointIndex <= endPt) {
             const auto& point = glyph.points[pointIndex];
             int x = point.x - glyph.header.xMin;
@@ -340,10 +340,6 @@ void TTFReader::exportGlyphSVG(const SimpleGlyph& glyph, const std::string& file
             svg << x << "," << y << " ";
             pointIndex++;
         }
-
-        const auto& firstPoint = glyph.points[startPt];
-        int firstX = firstPoint.x - glyph.header.xMin;
-        int firstY = firstPoint.y - glyph.header.yMin;  
         svg << "\" fill=\"none\" stroke=\"green\" stroke-width=\"1\"/>\n";
     }
     
@@ -538,4 +534,246 @@ void TTFReader::readMultipleGlyphsByIndex(int startIndex, int count) {
             std::cout << "Failed to read glyph " << glyphIndex << std::endl;
         }
     }
+}
+
+
+BezierPoint TTFReader::lerp(const BezierPoint& p1, const BezierPoint& p2, float t) {
+    return BezierPoint(
+        p1.x + t * (p2.x - p1.x),
+        p1.y + t * (p2.y - p1.y)
+    );
+}
+
+BezierPoint TTFReader::quadraticBezier(const BezierPoint& start, const BezierPoint& control, const BezierPoint& end, float t) {
+    BezierPoint p01 = lerp(start, control, t);    // Lerp between start and control
+    BezierPoint p12 = lerp(control, end, t);      // Lerp between control and end
+    return lerp(p01, p12, t);                     // Lerp between the two results
+}
+
+
+std::vector<BezierPoint> TTFReader::generateBezierCurve(const BezierPoint& start, const BezierPoint& control, const BezierPoint& end, int resolution) {
+    std::vector<BezierPoint> points;
+    points.reserve(resolution + 1);
+    
+    for (int i = 0; i <= resolution; i++) {
+        float t = static_cast<float>(i) / resolution;
+        points.push_back(quadraticBezier(start, control, end, t));
+    }
+    
+    return points;
+}
+
+
+std::vector<BezierPoint> TTFReader::generateGlyphOutline(const SimpleGlyph& glyph, int resolution) {
+    std::vector<BezierPoint> outline;
+    
+    size_t pointIndex = 0;
+    
+    // Process each contour
+    for (size_t contour = 0; contour < glyph.endPtsOfContours.size(); contour++) {
+        size_t startPt = pointIndex;
+        size_t endPt = glyph.endPtsOfContours[contour];
+        
+        std::cout << "Processing contour " << contour << " (points " << startPt << " to " << endPt << ")" << std::endl;
+        
+        // Process points in this contour
+        while (pointIndex <= endPt) {
+            const Point& currentPt = glyph.points[pointIndex];
+            
+            if (currentPt.onCurve) {
+                // On-curve point - add directly to outline
+                outline.push_back(BezierPoint(currentPt.x, currentPt.y));
+                pointIndex++;
+            } else {
+                // Off-curve point - this is a control point for a Bézier curve
+                if (pointIndex == 0 || pointIndex >= glyph.points.size() - 1) {
+                    // Edge case: skip if we can't form a proper curve
+                    pointIndex++;
+                    continue;
+                }
+                
+                // Find the previous on-curve point
+                BezierPoint startPoint;
+                if (outline.empty()) {
+                    // Use the last point of this contour as start
+                    const Point& lastPt = glyph.points[endPt];
+                    startPoint = BezierPoint(lastPt.x, lastPt.y);
+                } else {
+                    startPoint = outline.back();
+                }
+                
+                // Current point is the control point
+                BezierPoint controlPoint(currentPt.x, currentPt.y);
+                
+                // Find the next on-curve point (or implied point)
+                BezierPoint endPoint;
+                if (pointIndex + 1 <= endPt && glyph.points[pointIndex + 1].onCurve) {
+                    // Next point is on-curve
+                    const Point& nextPt = glyph.points[pointIndex + 1];
+                    endPoint = BezierPoint(nextPt.x, nextPt.y);
+                } else if (pointIndex + 1 <= endPt) {
+                    // Next point is also off-curve, so we have an implied on-curve point
+                    const Point& nextPt = glyph.points[pointIndex + 1];
+                    endPoint = BezierPoint(
+                        (currentPt.x + nextPt.x) / 2.0f,
+                        (currentPt.y + nextPt.y) / 2.0f
+                    );
+                } else {
+                    // Wrap to start of contour
+                    const Point& firstPt = glyph.points[startPt];
+                    endPoint = BezierPoint(firstPt.x, firstPt.y);
+                }
+                
+                // Generate the Bézier curve
+                std::vector<BezierPoint> curvePoints = generateBezierCurve(startPoint, controlPoint, endPoint, resolution);
+                
+                // Add curve points to outline (skip first point to avoid duplication)
+                for (size_t i = 1; i < curvePoints.size(); i++) {
+                    outline.push_back(curvePoints[i]);
+                }
+                
+                pointIndex++;
+            }
+        }
+    }
+    
+    return outline;
+
+}
+
+
+
+// void TTFReader::exportGlyphWithCurves(const SimpleGlyph& glyph, const std::string& filename) {
+//     std::ofstream svg(filename);
+    
+//     int width = glyph.header.xMax - glyph.header.xMin + 100;
+//     int height = glyph.header.yMax - glyph.header.yMin + 100;
+    
+//     svg << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+//     svg << "<svg width=\"" << width << "\" height=\"" << height << "\" xmlns=\"http://www.w3.org/2000/svg\">\n";
+//     svg << "<g transform=\"translate(50," << (height - 50) << ") scale(1,-1)\">\n";
+    
+//     // Draw original points (for reference)
+//     for (size_t i = 0; i < glyph.points.size(); i++) {
+//         const auto& point = glyph.points[i];
+//         int x = point.x - glyph.header.xMin;
+//         int y = point.y - glyph.header.yMin;
+        
+//         if (point.onCurve) {
+//             svg << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"2\" fill=\"red\" opacity=\"0.7\"/>\n";
+//         } else {
+//             svg << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"1\" fill=\"blue\" opacity=\"0.7\"/>\n";
+//         }
+//     }
+    
+//     // Generate and draw smooth outline
+//     std::vector<BezierPoint> outline = generateGlyphOutline(glyph, 10);
+    
+//     if (!outline.empty()) {
+//         svg << "<polyline points=\"";
+//         for (const auto& point : outline) {
+//             int x = static_cast<int>(point.x - glyph.header.xMin);
+//             int y = static_cast<int>(point.y - glyph.header.yMin);
+//             svg << x << "," << y << " ";
+//         }
+//         svg << "\" fill=\"none\" stroke=\"green\" stroke-width=\"2\"/>\n";
+//     }
+    
+//     svg << "</g>\n</svg>\n";
+//     svg.close();
+    
+//     std::cout << "Smooth curve SVG exported to: " << filename << std::endl;
+// }
+
+
+
+// Keep the existing working exportGlyphSVG function as is, and add this new function:
+
+void TTFReader::exportGlyphWithCurves(const SimpleGlyph& glyph, const std::string& filename) {
+    std::ofstream svg(filename);
+    
+    int width = glyph.header.xMax - glyph.header.xMin + 100;
+    int height = glyph.header.yMax - glyph.header.yMin + 100;
+    
+    svg << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    svg << "<svg width=\"" << width << "\" height=\"" << height << "\" xmlns=\"http://www.w3.org/2000/svg\">\n";
+    svg << "<g transform=\"translate(50," << (height - 50) << ") scale(1,-1)\">\n";
+    
+    // Draw original points for reference
+    for (size_t i = 0; i < glyph.points.size(); i++) {
+        const auto& point = glyph.points[i];
+        int x = point.x - glyph.header.xMin;
+        int y = point.y - glyph.header.yMin;
+        
+        if (point.onCurve) {
+            svg << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"2\" fill=\"red\" opacity=\"0.5\"/>\n";
+        } else {
+            svg << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"1\" fill=\"blue\" opacity=\"0.5\"/>\n";
+        }
+        svg << "<text x=\"" << (x + 3) << "\" y=\"" << (y + 3) << "\" font-size=\"6\" fill=\"black\" transform=\"scale(1,-1)\">" << i << "</text>\n";
+    }
+    
+    // Process each contour separately
+    size_t pointIndex = 0;
+    for (size_t contour = 0; contour < glyph.endPtsOfContours.size(); contour++) {
+        size_t startPt = pointIndex;
+        size_t endPt = glyph.endPtsOfContours[contour];
+        
+        svg << "<path d=\"";
+        
+        const auto& firstPoint = glyph.points[startPt];
+        int startX = firstPoint.x - glyph.header.xMin;
+        int startY = firstPoint.y - glyph.header.yMin;
+        svg << "M " << startX << " " << startY;
+        
+        // Process each point in the contour
+        for (size_t i = startPt; i <= endPt; i++) {
+            size_t nextIndex = (i == endPt) ? startPt : i + 1;  // Wrap around at end
+            
+            const auto& currentPt = glyph.points[i];
+            const auto& nextPt = glyph.points[nextIndex];
+            
+            int nextX = nextPt.x - glyph.header.xMin;
+            int nextY = nextPt.y - glyph.header.yMin;
+            
+            if (nextPt.onCurve) {
+                // Straight line to next on-curve point
+                svg << " L " << nextX << " " << nextY;
+            } else {
+                // Quadratic curve - find the end point
+                size_t endIndex = (nextIndex == endPt) ? startPt : nextIndex + 1;
+                if (endIndex > endPt) endIndex = startPt;
+                
+                const auto& endPoint = glyph.points[endIndex];
+                int endX, endY;
+                
+                if (endPoint.onCurve) {
+                    // Next point after control is on-curve
+                    endX = endPoint.x - glyph.header.xMin;
+                    endY = endPoint.y - glyph.header.yMin;
+                    i++; // Skip the control point in next iteration
+                } else {
+                    // Two consecutive off-curve points = implied on-curve point
+                    endX = (nextPt.x + endPoint.x) / 2 - glyph.header.xMin;
+                    endY = (nextPt.y + endPoint.y) / 2 - glyph.header.yMin;
+                    // Don't skip - the next off-curve point will be processed next
+                }
+                
+                // Control point
+                int ctrlX = nextPt.x - glyph.header.xMin;
+                int ctrlY = nextPt.y - glyph.header.yMin;
+                
+                svg << " Q " << ctrlX << " " << ctrlY << " " << endX << " " << endY;
+            }
+        }
+        
+        svg << " Z\" fill=\"none\" stroke=\"green\" stroke-width=\"2\"/>\n";  // Z closes the path
+        
+        pointIndex = endPt + 1;
+    }
+    
+    svg << "</g>\n</svg>\n";
+    svg.close();
+    
+    std::cout << "Curve SVG exported to: " << filename << std::endl;
 }
