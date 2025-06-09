@@ -269,3 +269,178 @@ void TTFReader::printGlyph(const SimpleGlyph& glyph) {
                   << ") " << (glyph.points[i].onCurve ? "ON" : "OFF") << std::endl;
     }
 }
+
+void TTFReader::plotGlyph(const SimpleGlyph& glyph, int width, int height) {
+    if (glyph.points.empty()) return;
+    
+    std::vector<std::vector<char>> grid(height, std::vector<char>(width, ' '));
+    
+    int16_t xRange = glyph.header.xMax - glyph.header.xMin;
+    int16_t yRange = glyph.header.yMax - glyph.header.yMin;
+    
+    if (xRange == 0 || yRange == 0) return;
+    
+    for (const auto& point : glyph.points) {
+        int x = ((point.x - glyph.header.xMin) * (width - 1)) / xRange;
+        int y = height - 1 - ((point.y - glyph.header.yMin) * (height - 1)) / yRange;
+        
+        // Bounds check
+        if (x >= 0 && x < width && y >= 0 && y < height) {
+            grid[y][x] = point.onCurve ? '*' : 'o';
+        }
+    }
+    
+    // Print grid
+    std::cout << "\nGlyph Plot (" << width << "x" << height << "):" << std::endl;
+    std::cout << "* = on-curve points, o = off-curve (control) points" << std::endl;
+    
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            std::cout << grid[y][x];
+        }
+        std::cout << std::endl;
+    }
+}
+
+void TTFReader::exportGlyphSVG(const SimpleGlyph& glyph, const std::string& filename) {
+    std::ofstream svg(filename);
+    
+    int width = glyph.header.xMax - glyph.header.xMin + 100;
+    int height = glyph.header.yMax - glyph.header.yMin + 100;
+    
+    svg << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    svg << "<svg width=\"" << width << "\" height=\"" << height << "\" xmlns=\"http://www.w3.org/2000/svg\">\n";
+    svg << "<g transform=\"translate(50," << (height - 50) << ") scale(1,-1)\">\n";
+    
+    // Draw points
+    for (size_t i = 0; i < glyph.points.size(); i++) {
+        const auto& point = glyph.points[i];
+        int x = point.x - glyph.header.xMin;
+        int y = point.y - glyph.header.yMin;
+        
+        if (point.onCurve) {
+            svg << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"3\" fill=\"red\"/>\n";
+        } else {
+            svg << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"2\" fill=\"blue\"/>\n";
+        }
+        
+        svg << "<text x=\"" << (x + 5) << "\" y=\"" << (y + 5) << "\" font-size=\"8\" fill=\"white\" transform=\"scale(1,-1)\">" << i << "</text>\n";
+    }
+    
+    size_t pointIndex = 0;
+    for (size_t contour = 0; contour < glyph.endPtsOfContours.size(); contour++) {
+        size_t startPt = pointIndex;
+        size_t endPt = glyph.endPtsOfContours[contour];
+        
+        svg << "<polyline points=\"";
+        while (pointIndex <= endPt) {
+            const auto& point = glyph.points[pointIndex];
+            int x = point.x - glyph.header.xMin;
+            int y = point.y - glyph.header.yMin;
+            svg << x << "," << y << " ";
+            pointIndex++;
+        }
+
+        const auto& firstPoint = glyph.points[startPt];
+        int firstX = firstPoint.x - glyph.header.xMin;
+        int firstY = firstPoint.y - glyph.header.yMin;  
+        svg << "\" fill=\"none\" stroke=\"green\" stroke-width=\"1\"/>\n";
+    }
+    
+    svg << "</g>\n</svg>\n";
+    svg.close();
+    
+    std::cout << "SVG exported to: " << filename << std::endl;
+}
+
+
+
+bool TTFReader::readMultipleGlyphs(int count) {
+    for (int i = 0; i < count; i++) {
+        std::cout << "\n--- Parsing glyph " << i << " ---" << std::endl;
+        
+        // Save current position
+        std::streampos currentPos = file.tellg();
+        
+        SimpleGlyph glyph;
+        if (readSimpleGlyph(glyph)) {
+            std::cout << "Glyph " << i << ":" << std::endl;
+            printGlyph(glyph);
+            plotGlyph(glyph);
+            
+            std::string filename = "glyph_" + std::to_string(i) + ".svg";
+            exportGlyphSVG(glyph, filename);
+        } else {
+            std::cout << "Failed to parse glyph " << i << " - trying to skip ahead" << std::endl;
+            
+            // Go back to where we started and skip a reasonable amount
+            file.clear(); // Clear any error flags
+            file.seekg(currentPos + std::streamoff(100), std::ios::beg); // Skip 100 bytes
+            
+            if (!file.good()) {
+                std::cout << "Reached end of glyph data" << std::endl;
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+void TTFReader::explainLocaTable() {
+    std::cout << "\n=== Understanding 'loca' table ===" << std::endl;
+    
+    // Step 1: Check format in head table
+    TableEntry headEntry;
+    if (!findTable("head", headEntry)) {
+        std::cout << "No 'head' table found" << std::endl;
+        return;
+    }
+    
+    std::cout << "Found 'head' table at offset: " << headEntry.offset << std::endl;
+    
+    // Read indexToLocFormat (at offset 50 in head table)
+    file.seekg(headEntry.offset + 50, std::ios::beg);
+    int16_t indexToLocFormat;
+    file.read(reinterpret_cast<char*>(&indexToLocFormat), 2);
+    if (littleEndian) indexToLocFormat = static_cast<int16_t>(swapUint16(indexToLocFormat));
+    
+    bool isLongFormat = (indexToLocFormat == 1);
+    std::cout << "Format: " << (isLongFormat ? "Long (4 bytes)" : "Short (2 bytes)") << std::endl;
+    
+    // Step 2: Read loca table
+    TableEntry locaEntry;
+    if (!findTable("loca", locaEntry)) {
+        std::cout << "No 'loca' table found" << std::endl;
+        return;
+    }
+    
+    std::cout << "Found 'loca' table at offset: " << locaEntry.offset 
+              << ", length: " << locaEntry.length << std::endl;
+    
+    // Calculate number of glyphs
+    size_t entrySize = isLongFormat ? 4 : 2;
+    size_t numEntries = locaEntry.length / entrySize;
+    size_t numGlyphs = numEntries - 1; // Last entry is end marker
+    
+    std::cout << "Number of glyphs: " << numGlyphs << std::endl;
+    
+    // Read first 10 entries as example
+    file.seekg(locaEntry.offset, std::ios::beg);
+    std::cout << "\nFirst 10 glyph locations:" << std::endl;
+    
+    for (int i = 0; i < 10 && i < static_cast<int>(numEntries); i++) {
+        uint32_t offset;
+        
+        if (isLongFormat) {
+            file.read(reinterpret_cast<char*>(&offset), 4);
+            if (littleEndian) offset = swapUint32(offset);
+        } else {
+            uint16_t shortOffset;
+            file.read(reinterpret_cast<char*>(&shortOffset), 2);
+            if (littleEndian) shortOffset = swapUint16(shortOffset);
+            offset = shortOffset * 2; // Convert to actual offset
+        }
+        
+        std::cout << "  Glyph " << i << ": starts at offset " << offset << std::endl;
+    }
+}

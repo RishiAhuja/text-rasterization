@@ -70,6 +70,11 @@ public:
     bool readGlyphHeader(GlyphHeader& header);
     bool readSimpleGlyph(SimpleGlyph& glyph);
     void printGlyph(const SimpleGlyph& glyph);
+    void plotGlyph(const SimpleGlyph& glyph, int width = 80, int height = 40);
+    void exportGlyphSVG(const SimpleGlyph& glyph, const std::string& filename);
+    bool readMultipleGlyphs(int count);
+    void explainLocaTable();
+
 };
 
 #endif
