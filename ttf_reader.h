@@ -43,6 +43,8 @@ class TTFReader {
 private:
     std::ifstream file;
     bool littleEndian;
+    bool isLongFormat = false; 
+    std::vector<uint32_t> glyphOffsets;
     
     // Byte swapping utilities
     uint16_t swapUint16(uint16_t val);
@@ -74,6 +76,9 @@ public:
     void exportGlyphSVG(const SimpleGlyph& glyph, const std::string& filename);
     bool readMultipleGlyphs(int count);
     void explainLocaTable();
+    bool loadLocaTable(); 
+    bool readGlyphByIndex(int glyphIndex, SimpleGlyph& glyph);
+    void readMultipleGlyphsByIndex(int startIndex, int count);
 
 };
 

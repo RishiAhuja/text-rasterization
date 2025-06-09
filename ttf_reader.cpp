@@ -444,3 +444,98 @@ void TTFReader::explainLocaTable() {
         std::cout << "  Glyph " << i << ": starts at offset " << offset << std::endl;
     }
 }
+
+
+
+bool TTFReader::loadLocaTable() {
+    // Step 1: Get format from head table
+    TableEntry headEntry;
+    if (!findTable("head", headEntry)) return false;
+    
+    file.seekg(headEntry.offset + 50, std::ios::beg);
+    int16_t indexToLocFormat;
+    file.read(reinterpret_cast<char*>(&indexToLocFormat), 2);
+    if (littleEndian) indexToLocFormat = static_cast<int16_t>(swapUint16(indexToLocFormat));
+    
+    isLongFormat = (indexToLocFormat == 1);
+    
+    // Step 2: Load all glyph offsets
+    TableEntry locaEntry;
+    if (!findTable("loca", locaEntry)) return false;
+    
+    size_t entrySize = isLongFormat ? 4 : 2;
+    size_t numEntries = locaEntry.length / entrySize;
+    
+    glyphOffsets.clear();
+    glyphOffsets.reserve(numEntries);
+    
+    file.seekg(locaEntry.offset, std::ios::beg);
+    
+    for (size_t i = 0; i < numEntries; i++) {
+        uint32_t offset;
+        
+        if (isLongFormat) {
+            file.read(reinterpret_cast<char*>(&offset), 4);
+            if (littleEndian) offset = swapUint32(offset);
+        } else {
+            uint16_t shortOffset;
+            file.read(reinterpret_cast<char*>(&shortOffset), 2);
+            if (littleEndian) shortOffset = swapUint16(shortOffset);
+            offset = shortOffset * 2;
+        }
+        
+        glyphOffsets.push_back(offset);
+    }
+    
+    std::cout << "Loaded " << (numEntries - 1) << " glyph locations" << std::endl;
+    return true;
+}
+
+
+bool TTFReader::readGlyphByIndex(int glyphIndex, SimpleGlyph& glyph) {
+    if (glyphOffsets.empty()) {
+        if (!loadLocaTable()) return false;
+    }
+
+    if (glyphIndex < 0 || glyphIndex >= static_cast<int>(glyphOffsets.size() - 1)) {
+        std::cout << "Glyph index " << glyphIndex << " out of range" << std::endl;
+        return false;
+    }
+    
+    uint32_t glyphOffset = glyphOffsets[glyphIndex];
+    uint32_t nextGlyphOffset = glyphOffsets[glyphIndex + 1];
+    
+    if (glyphOffset == nextGlyphOffset) {
+        std::cout << "Glyph " << glyphIndex << " is empty (no outline data)" << std::endl;
+        return false;
+    }
+    
+    TableEntry glyfEntry;
+    if (!findTable("glyf", glyfEntry)) return false;
+    
+    file.seekg(glyfEntry.offset + glyphOffset, std::ios::beg);
+    
+    std::cout << "Reading glyph " << glyphIndex << " at offset " << (glyfEntry.offset + glyphOffset) 
+              << " (size: " << (nextGlyphOffset - glyphOffset) << " bytes)" << std::endl;
+    
+    return readSimpleGlyph(glyph);
+}
+
+
+void TTFReader::readMultipleGlyphsByIndex(int startIndex, int count) {
+    for (int i = 0; i < count; i++) {
+        int glyphIndex = startIndex + i;
+        std::cout << "\n=== Reading Glyph " << glyphIndex << " ===" << std::endl;
+        
+        SimpleGlyph glyph;
+        if (readGlyphByIndex(glyphIndex, glyph)) {
+            printGlyph(glyph);
+            plotGlyph(glyph);
+            
+            std::string filename = "glyph_" + std::to_string(glyphIndex) + ".svg";
+            exportGlyphSVG(glyph, filename);
+        } else {
+            std::cout << "Failed to read glyph " << glyphIndex << std::endl;
+        }
+    }
+}

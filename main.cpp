@@ -54,7 +54,8 @@ int main() {
             //     std::cout << "Failed to parse glyph" << std::endl;
             // }
             //  reader.readMultipleGlyphs(5);
-            reader.explainLocaTable();
+            std::cout << "\n=== Reading Glyphs by Index ===" << std::endl;
+            reader.readMultipleGlyphsByIndex(1, 26);  // Read glyphs 1-10
         }
     } else {
         std::cout << "'glyf' table not found!" << std::endl;
